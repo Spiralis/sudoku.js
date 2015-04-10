@@ -21,7 +21,7 @@
     
     var MIN_GIVENS = 17;            // Minimum number of givens 
     var NR_SQUARES = 81;            // Number of squares
-    
+
     // Define difficulties by how many squares are given to the player in a new
     // puzzle.
     var DIFFICULTY = {
@@ -48,30 +48,23 @@
         SQUARE_UNITS_MAP    = sudoku._get_square_units_map(SQUARES, UNITS);
         SQUARE_PEERS_MAP    = sudoku._get_square_peers_map(SQUARES, 
                                     SQUARE_UNITS_MAP);
-        //console.log("SQUARES:");
-        //console.dir(SQUARES);
-        //console.log("UNITS:");
-        //console.dir(UNITS);
-        //console.log("SQUARE_UNITS_MAP:");
-        //console.dir(SQUARE_UNITS_MAP);
-        //console.log("SQUARE_PEERS_MAP:");
-        //console.dir(SQUARE_PEERS_MAP);
     }
 
     // _sanity_check
     // -------------------------------------------------------------------------
     sudoku._sanity_check = function(givens){
-        /* 
-        The input is a two-dimensional array that holds all possible candidates 
-        for the puzzle. Iterating each of them recursively should help discover 
-        multiple solutions. 
-        The simple solution is to test one
-        */
-        var start = +new Date();
-        var solutions = sudoku._do_sanity_check(givens);
-        var end = +new Date();
-        console.log("sudoku._sanity_check() took " + (end-start) + " milliseconds.");
-        return solutions.length == 1;
+        var candidates = sudoku.get_candidates(givens);
+        var unique = true;
+        for(var r=0; r<9; r++){
+            for(var c=0; c<9; c++){
+                var cands = candidates[r][c];
+                if (cands.length > 1){
+                    unique = false;
+                    break;
+                }
+            }
+        }
+        return unique;
     }
 
     sudoku._onlyUnique = function(value, index, self) { 
@@ -81,75 +74,6 @@
     sudoku._stringReplaceAt = function(str, index, character) {
         return str.substr(0, index) + character + str.substr(index+character.length);
     } 
-
-    sudoku._do_sanity_check = function(givens, solutions, depth){
-        if (!solutions)
-            solutions = [];
-        if (!depth)
-            depth = 0;
-
-        var indent = "";
-        for(var x=0; x < depth; x++){
-            indent = indent + "\t";
-        }
-
-        var candidates = sudoku.get_candidates(givens);
-        if (!candidates){
-            console.log(indent + "Invalid solution. Unable to create candidates: " + givens);
-            return solutions;
-        } else {
-            console.log(indent + "Givens: " + givens);
-        }
-
-        //console.dir(candidates);
-
-        var foundSolution = true;
-
-        //console.log(indent + "depth: " + depth);
-        // Iterate all multi-values
-        for (var j = 0; j < 9; j++) {
-            for (var i = 0; i < 9; i++) {
-                var pos = (j)*9+i;
-                var values = candidates[j][i];
-                if (givens[pos] == "."){
-                    if (values.length == 1){
-                        // Replace the .
-                        givens = sudoku._stringReplaceAt(givens, pos, values);
-                        //console.log(indent + "\tOnly one choice '" + givens[pos] + "'");
-                    } else {
-                        foundSolution = false;
-                        for (var v = 0; v < values.length; v++) {
-                            // Try each value
-                            var newGivens = sudoku._stringReplaceAt(givens, pos, values.charAt(v));
-                            //console.log(indent + "Given (" + (j+1) + "," + (i+1) + ") [" + pos + "]: " + givens[pos] + ", Candidates: " + values + " - Trying : '" + newGivens[pos] + "'");
-                            solutions = sudoku._do_sanity_check(newGivens, solutions, depth+1);
-                            if (solutions.length > 1){
-                                // We have more than one solution. The puzzle is no good! No point in checking more.
-                                return solutions;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if (foundSolution){
-            // The current given is a solution, but is it a duplicate, and does this mean that there are more than one solution?
-            var pre = solutions.length;
-            solutions.push(givens);
-            if (solutions.length > 1){
-                solutions = solutions.filter(sudoku._onlyUnique);
-                var post = solutions.length;
-                if (pre == post){
-                    console.log(indent + "Puzzle solution is duplicate (ignore/continue): " + givens);
-                } else {
-                    console.log(indent + "Puzzle has multiple solutions (add/abort): " + givens);
-                }
-            } else {
-                console.log(indent + "Puzzle solution is unique (add/continue): " + givens);
-            }
-        }
-        return solutions;
-    }
 
     sudoku._get_related_positions = function (i) {
         var row = [],
@@ -177,26 +101,22 @@
     sudoku.get_pencilmarks = function (given) {
         var pencilmarks = [];
         var aGiven = given.split("");
-        console.dir(aGiven);
         for (var r=0; r < 9; r++){
             var rowmarks = [];
             for (var c=0; c < 9; c++){
                 var i = r*9+c;
-                console.log("i=" + i + ", value=" + aGiven[i]);
                 if (aGiven[i] == '.') {
                     var related = sudoku._get_related_positions(i);
                     var relCells = related.col.concat(related.row.concat(related.square));
                     relCells = relCells.filter(sudoku._onlyUnique);
                     var candidates = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
                     for (var j=0; j < relCells.length; j++){
-                        // Remove candidates
                         var pos = relCells[j];
                         var inRowValue = aGiven[pos];
                         if (inRowValue != ".") {
                             var index = candidates.indexOf(inRowValue);
                             if (index > -1) {
                                 candidates.splice(index, 1);
-                                console.log("Removed '" + inRowValue + "' as candidate (found in the row for position " + pos + ").");
                             }
                         }
                     }
@@ -212,7 +132,7 @@
 
     // Generate
     // -------------------------------------------------------------------------
-    sudoku.generate = function(difficulty, unique){
+    sudoku.generate = function(difficulty, unique, solve_failures, unique_failures, start){
         /* Generate a new Sudoku puzzle of a particular `difficulty`, e.g.,
         
             // Generate an "easy" sudoku puzzle
@@ -239,14 +159,18 @@
         outside of that range, `difficulty` will be set to the closest bound,
         e.g., 0 -> 17, and 100 -> 81.
         
-        
+       
         By default, the puzzles are unique, uless you set `unique` to false. 
-        (Note: Puzzle uniqueness is not yet implemented, so puzzles are *not* 
-        guaranteed to have unique solutions)
-        
-        TODO: Implement puzzle uniqueness
         */
-        
+
+        start = start || +new Date();
+
+        solve_failures  = solve_failures  || 0; // Number of times failing to generate a solvable puzzle
+        unique_failures = unique_failures || 0; // Number of times failing to generate a unique puzzle
+
+        var failed_solve = false;
+        var failed_unique = false;
+
         // If `difficulty` is a string or undefined, convert it to a number or
         // default it to "easy" if undefined.
         if(typeof difficulty === "string" || typeof difficulty === "undefined"){
@@ -320,21 +244,32 @@
                 }
                 
                 // Double check board is solvable
-                if (unique == false || (unique == true && sudoku._sanity_check(board))) {
+                if (unique == false || sudoku._sanity_check(board)) {
                     var solution = sudoku.solve(board);
                     if (solution) {
+                        // Success, a solution that has the required number of givens and being unique (if required)
+                        var end = +new Date();
+                        console.log("sudoku.generate() took " + (end-start) + " ms. solve_failures: " + solve_failures + ". " + (unique ? ("unique_failures: " + unique_failures) : ""));
                         return {
                             'difficulty': difficulty,
                             'given': board,
                             'solution': solution,
                         };
-                    }
-                }
-            }
+                    } else
+                        failed_solve = true;
+                } else
+                    failed_unique = true;
+            } else 
+                failed_solve = true;
         }
-        
-        // Give up and try a new puzzle
-        return sudoku.generate(difficulty);
+
+        if (failed_unique)
+            unique_failures++;
+        else
+            solve_failures++;
+
+        // Try creating another solution, recursively
+        return sudoku.generate(difficulty, unique, solve_failures, unique_failures, start);
     };
 
     // Solve
